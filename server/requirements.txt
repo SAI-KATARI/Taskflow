@@ -1,0 +1,18 @@
+Flask==3.0.0
+flask-cors==4.0.0
+flask-jwt-extended==4.5.3
+flask-socketio==5.3.5
+mysql-connector-python==8.2.0
+bcrypt==4.1.2
+python-socketio==5.10.0
+gunicorn==21.2.0
+python-engineio==4.8.0
+```
+
+---
+
+### Create `Procfile` for Render
+
+**In `server` folder, create file named `Procfile` (no extension):**
+```
+web: gunicorn --worker-class eventlet -w 1 app:app

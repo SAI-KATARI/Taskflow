@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TaskFlow Real-time Test</title>
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #4F46E5; }
+        .status { 
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .connected { background: #D1FAE5; color: #065F46; }
+        .disconnected { background: #FEE2E2; color: #991B1B; }
+        .event {
+            background: #EEF2FF;
+            border-left: 4px solid #4F46E5;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 TaskFlow Real-time Test</h1>
+        <div id="status" class="status disconnected">Disconnected</div>
+        
+        <h2>Real-time Events:</h2>
+        <div id="events"></div>
+    </div>
+
+    <script>
+        const socket = io('http://localhost:5000');
+        const statusDiv = document.getElementById('status');
+        const eventsDiv = document.getElementById('events');
+
+        socket.on('connect', () => {
+            statusDiv.textContent = '✅ Connected to WebSocket!';
+            statusDiv.className = 'status connected';
+            console.log('Connected!');
+        });
+
+        socket.on('disconnect', () => {
+            statusDiv.textContent = '❌ Disconnected';
+            statusDiv.className = 'status disconnected';
+        });
+
+        socket.on('task_created', (data) => {
+            console.log('Task created:', data);
+            const eventDiv = document.createElement('div');
+            eventDiv.className = 'event';
+            eventDiv.innerHTML = `
+                <strong>🎉 New Task Created!</strong><br>
+                <strong>ID:</strong> ${data.id}<br>
+                <strong>Title:</strong> ${data.title}<br>
+                <strong>Status:</strong> ${data.status}<br>
+                <strong>Priority:</strong> ${data.priority}<br>
+                <small>Time: ${new Date().toLocaleTimeString()}</small>
+            `;
+            eventsDiv.insertBefore(eventDiv, eventsDiv.firstChild);
+        });
+    </script>
+</body>
+</html>

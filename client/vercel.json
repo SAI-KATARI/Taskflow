@@ -1,0 +1,32 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
+```
+
+---
+
+### File 11: `.gitignore` (Root Level)
+```
+# Backend
+server/venv/
+server/__pycache__/
+server/*.pyc
+server/.env
+
+# Frontend
+client/node_modules/
+client/dist/
+client/.env
+client/.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
