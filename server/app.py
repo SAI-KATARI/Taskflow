@@ -2,7 +2,8 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flask_socketio import SocketIO, emit
-import mysql.connector
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from datetime import datetime, timedelta
 import bcrypt
 import os
@@ -26,31 +27,28 @@ app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'your-secret-key-chan
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
 
 jwt = JWTManager(app)
-socketio = SocketIO(app, 
-                    cors_allowed_origins=allowed_origins,
-                    async_mode='threading')
+socketio = SocketIO(app, cors_allowed_origins=allowed_origins)
 
-# Database connection - Production Ready
-db_config = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', 'KU@2002'),
-    'database': os.getenv('DB_NAME', 'taskflow_db'),
-    'port': int(os.getenv('DB_PORT', '3306'))
-}
+# Database connection - PostgreSQL
+DATABASE_URL = os.getenv('DATABASE_URL')
 
-db = mysql.connector.connect(**db_config)
+def get_db():
+    """Get database connection with RealDictCursor"""
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    return conn
 
 # Helper function to log activity
 def log_activity(user_id, task_id, action, description):
     try:
-        cursor = db.cursor()
+        conn = get_db()
+        cursor = conn.cursor()
         cursor.execute(
             'INSERT INTO activity_log (user_id, task_id, action, description) VALUES (%s, %s, %s, %s)',
             (user_id, task_id, action, description)
         )
-        db.commit()
+        conn.commit()
         cursor.close()
+        conn.close()
     except Exception as e:
         print(f"Error logging activity: {str(e)}")
 
@@ -69,22 +67,25 @@ def register():
         if not email or not password or not full_name:
             return jsonify({'error': 'All fields required'}), 400
 
-        cursor = db.cursor(dictionary=True)
+        conn = get_db()
+        cursor = conn.cursor()
         cursor.execute('SELECT * FROM users WHERE email = %s', (email,))
         
         if cursor.fetchone():
             cursor.close()
+            conn.close()
             return jsonify({'error': 'Email already registered'}), 400
 
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
         
         cursor.execute(
-            'INSERT INTO users (email, password_hash, full_name) VALUES (%s, %s, %s)',
+            'INSERT INTO users (email, password_hash, full_name) VALUES (%s, %s, %s) RETURNING id',
             (email, hashed_password.decode('utf-8'), full_name)
         )
-        db.commit()
-        user_id = cursor.lastrowid
+        user_id = cursor.fetchone()['id']
+        conn.commit()
         cursor.close()
+        conn.close()
 
         access_token = create_access_token(identity=str(user_id))
         
@@ -113,10 +114,12 @@ def login():
         if not email or not password:
             return jsonify({'error': 'Email and password required'}), 400
 
-        cursor = db.cursor(dictionary=True)
+        conn = get_db()
+        cursor = conn.cursor()
         cursor.execute('SELECT * FROM users WHERE email = %s', (email,))
         user = cursor.fetchone()
         cursor.close()
+        conn.close()
 
         if not user or not bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
             return jsonify({'error': 'Invalid credentials'}), 401
@@ -148,13 +151,15 @@ def login():
 def get_tasks():
     try:
         user_id = get_jwt_identity()
-        cursor = db.cursor(dictionary=True)
+        conn = get_db()
+        cursor = conn.cursor()
         cursor.execute(
             'SELECT * FROM tasks WHERE user_id = %s ORDER BY created_at DESC',
             (user_id,)
         )
         tasks = cursor.fetchall()
         cursor.close()
+        conn.close()
         return jsonify({'tasks': tasks}), 200
     except Exception as e:
         print(f"Error fetching tasks: {str(e)}")
@@ -177,22 +182,21 @@ def create_task():
         if not title:
             return jsonify({'error': 'Title is required'}), 400
         
-        cursor = db.cursor(dictionary=True)
+        conn = get_db()
+        cursor = conn.cursor()
         cursor.execute(
-            'INSERT INTO tasks (user_id, title, description, priority, status, due_date) VALUES (%s, %s, %s, %s, %s, %s)',
+            'INSERT INTO tasks (user_id, title, description, priority, status, due_date) VALUES (%s, %s, %s, %s, %s, %s) RETURNING *',
             (user_id, title, description, priority, status, due_date)
         )
-        db.commit()
-        
-        task_id = cursor.lastrowid
-        cursor.execute('SELECT * FROM tasks WHERE id = %s', (task_id,))
         new_task = cursor.fetchone()
+        conn.commit()
         cursor.close()
+        conn.close()
         
-        log_activity(user_id, task_id, 'created', f'Created task: {title}')
+        log_activity(user_id, new_task['id'], 'created', f'Created task: {title}')
         
         try:
-            socketio.emit('task_created', new_task, broadcast=True)
+            socketio.emit('task_created', dict(new_task), broadcast=True)
         except Exception as e:
             print(f"Socket emit error: {e}")
         
@@ -215,12 +219,14 @@ def update_task(task_id):
         user_id = get_jwt_identity()
         data = request.get_json()
         
-        cursor = db.cursor(dictionary=True)
+        conn = get_db()
+        cursor = conn.cursor()
         cursor.execute('SELECT * FROM tasks WHERE id = %s AND user_id = %s', (task_id, user_id))
         task = cursor.fetchone()
         
         if not task:
             cursor.close()
+            conn.close()
             return jsonify({'error': 'Task not found'}), 404
         
         title = data.get('title', task['title'])
@@ -238,14 +244,13 @@ def update_task(task_id):
             changes.append(f"Title changed")
         
         cursor.execute(
-            'UPDATE tasks SET title = %s, description = %s, priority = %s, status = %s, due_date = %s WHERE id = %s',
+            'UPDATE tasks SET title = %s, description = %s, priority = %s, status = %s, due_date = %s WHERE id = %s RETURNING *',
             (title, description, priority, status, due_date, task_id)
         )
-        db.commit()
-        
-        cursor.execute('SELECT * FROM tasks WHERE id = %s', (task_id,))
         updated_task = cursor.fetchone()
+        conn.commit()
         cursor.close()
+        conn.close()
         
         if changes:
             log_activity(user_id, task_id, 'updated', f'Updated task: {", ".join(changes)}')
@@ -266,19 +271,22 @@ def delete_task(task_id):
     try:
         user_id = get_jwt_identity()
         
-        cursor = db.cursor(dictionary=True)
+        conn = get_db()
+        cursor = conn.cursor()
         cursor.execute('SELECT title FROM tasks WHERE id = %s AND user_id = %s', (task_id, user_id))
         task = cursor.fetchone()
         
         if not task:
             cursor.close()
+            conn.close()
             return jsonify({'error': 'Task not found'}), 404
         
         task_title = task['title']
         
         cursor.execute('DELETE FROM tasks WHERE id = %s AND user_id = %s', (task_id, user_id))
-        db.commit()
+        conn.commit()
         cursor.close()
+        conn.close()
         
         log_activity(user_id, None, 'deleted', f'Deleted task: {task_title}')
         
@@ -309,17 +317,20 @@ def update_user_profile(user_id):
         if not full_name or not email:
             return jsonify({'error': 'Full name and email required'}), 400
         
-        cursor = db.cursor(dictionary=True)
+        conn = get_db()
+        cursor = conn.cursor()
         cursor.execute('SELECT id FROM users WHERE email = %s AND id != %s', (email, user_id))
         existing = cursor.fetchone()
         
         if existing:
             cursor.close()
+            conn.close()
             return jsonify({'error': 'Email already in use'}), 400
         
         cursor.execute('UPDATE users SET full_name = %s, email = %s WHERE id = %s', (full_name, email, user_id))
-        db.commit()
+        conn.commit()
         cursor.close()
+        conn.close()
         
         return jsonify({'message': 'Profile updated successfully'}), 200
         
@@ -344,22 +355,26 @@ def change_password():
         if len(new_password) < 8:
             return jsonify({'error': 'Password must be at least 8 characters'}), 400
         
-        cursor = db.cursor(dictionary=True)
+        conn = get_db()
+        cursor = conn.cursor()
         cursor.execute('SELECT password_hash FROM users WHERE id = %s', (current_user_id,))
         user = cursor.fetchone()
         
         if not user:
             cursor.close()
+            conn.close()
             return jsonify({'error': 'User not found'}), 404
         
         if not bcrypt.checkpw(current_password.encode('utf-8'), user['password_hash'].encode('utf-8')):
             cursor.close()
+            conn.close()
             return jsonify({'error': 'Current password is incorrect'}), 401
         
         hashed = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
         cursor.execute('UPDATE users SET password_hash = %s WHERE id = %s', (hashed.decode('utf-8'), current_user_id))
-        db.commit()
+        conn.commit()
         cursor.close()
+        conn.close()
         
         return jsonify({'message': 'Password changed successfully'}), 200
         
@@ -396,13 +411,13 @@ def upload_avatar(user_id):
         data = request.get_json()
         avatar_data = data.get('avatar')
         
-        cursor = db.cursor(dictionary=True)
-        cursor.execute('UPDATE users SET avatar = %s WHERE id = %s', (avatar_data, user_id))
-        db.commit()
-        
-        cursor.execute('SELECT avatar FROM users WHERE id = %s', (user_id,))
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE users SET avatar = %s WHERE id = %s RETURNING avatar', (avatar_data, user_id))
         user = cursor.fetchone()
+        conn.commit()
         cursor.close()
+        conn.close()
         
         return jsonify({
             'message': 'Avatar updated successfully',
@@ -425,7 +440,8 @@ def get_activity():
         user_id = get_jwt_identity()
         limit = request.args.get('limit', 50, type=int)
         
-        cursor = db.cursor(dictionary=True)
+        conn = get_db()
+        cursor = conn.cursor()
         cursor.execute('''
             SELECT a.*, t.title as task_title 
             FROM activity_log a
@@ -437,6 +453,7 @@ def get_activity():
         
         activities = cursor.fetchall()
         cursor.close()
+        conn.close()
         
         return jsonify({'activities': activities}), 200
         
@@ -472,7 +489,7 @@ def health_check():
 # ============================================
 
 if __name__ == '__main__':
-    print("🚀 Starting TaskFlow backend...")
-    print(f"📍 Server: http://127.0.0.1:{os.getenv('PORT', 5000)}")
+    print("🚀 Starting Taskflow backend...")
+    print(f"📍 Server: http://0.0.0.0:{os.getenv('PORT', 5000)}")
     port = int(os.getenv('PORT', 5000))
     socketio.run(app, host='0.0.0.0', port=port, debug=False)
