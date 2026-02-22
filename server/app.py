@@ -28,7 +28,7 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
 jwt = JWTManager(app)
 socketio = SocketIO(app, 
                     cors_allowed_origins=allowed_origins,
-                    async_mode='eventlet')
+                    async_mode='threading')
 
 # Database connection - Production Ready
 db_config = {
