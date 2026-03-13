@@ -305,7 +305,6 @@ This project is licensed under the MIT License.
 
 **Sai Katari**
 - GitHub: [@SAI-KATARI](https://github.com/SAI-KATARI)
-- Email: your.email@example.com
 
 ---
 
