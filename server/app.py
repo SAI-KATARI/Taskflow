@@ -488,6 +488,33 @@ def health_check():
 # RUN APP
 # ============================================
 
+
+
+@app.route('/api/admin/users', methods=['GET'])
+def admin_check_users():
+    """Check registered users"""
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, email, full_name, created_at 
+            FROM users 
+            ORDER BY created_at DESC
+        """)
+        users = cursor.fetchall()
+        
+        cursor.execute("SELECT COUNT(*) as count FROM tasks")
+        tasks = cursor.fetchone()
+        
+        return jsonify({
+            "total_users": len(users),
+            "total_tasks": tasks['count'],
+            "users": users
+        })
+    finally:
+        cursor.close()
+        conn.close()
+
 if __name__ == '__main__':
     print("🚀 Starting Taskflow backend...")
     print(f"📍 Server: http://0.0.0.0:{os.getenv('PORT', 5000)}")
