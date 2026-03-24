@@ -497,7 +497,8 @@ def admin_check_users():
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, email, full_name, created_at 
+            SELECT id, email, full_name, 
+                   TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at
             FROM users 
             ORDER BY created_at DESC
         """)
@@ -508,9 +509,11 @@ def admin_check_users():
         
         return jsonify({
             "total_users": len(users),
-            "total_tasks": tasks['count'],
+            "total_tasks": tasks['count'] if tasks else 0,
             "users": users
         })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     finally:
         cursor.close()
         conn.close()
