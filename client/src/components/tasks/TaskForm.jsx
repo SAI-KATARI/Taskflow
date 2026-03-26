@@ -195,7 +195,7 @@ function TaskForm({ isOpen, onClose, task, onTaskCreated }) {
                 </span>
                 {formData.due_date && (
                   <span className="text-xs text-gray-600 dark:text-gray-400">
-                    📅 {new Date(formData.due_date).toLocaleDateString()}
+                    📅 {new Date(formData.due_date + 'T00:00:00').toLocaleDateString()}
                   </span>
                 )}
               </div>
